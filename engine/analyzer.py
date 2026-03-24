@@ -15,12 +15,34 @@ SQL_ERROR_PATTERNS = [
     r"sql syntax",
     r"mysql_fetch",
     r"warning.*mysql",
+    r"mysql_num_rows",
+    r"mysql_query",
+    r"supplied argument is not a valid mysql",
+    r"you have an error in your sql syntax",
     r"unclosed quotation mark after the character string",
     r"quoted string not properly terminated",
     r"postgresql.*error",
+    r"pg_query",
     r"sqlite.*error",
+    r"sqlite_exception",
     r"odbc sql server driver",
+    r"microsoft ole db provider for sql server",
     r"sqlstate",
+    r"syntax error",
+    r"fatal error",
+    r"unknown column",
+    r"unterminated quoted string",
+]
+
+SQL_TEST_PAYLOADS = [
+    "'",
+    '"',
+    "'--",
+    '"--',
+    "' OR '1'='1",
+    '" OR "1"="1',
+    "')",
+    '")',
 ]
 
 REFLECTION_MARKER = "__INTELLISCAN_MARKER__"
@@ -30,35 +52,30 @@ IMPORTANT_SECURITY_HEADERS = {
         "title": "Missing Content-Security-Policy",
         "severity": "High",
         "confidence": "High",
-        "description": "Response does not define a Content-Security-Policy header.",
         "recommendation": "Add a restrictive Content-Security-Policy header to reduce script injection risk.",
     },
     "x-frame-options": {
         "title": "Missing X-Frame-Options",
         "severity": "Medium",
         "confidence": "High",
-        "description": "Response does not define an X-Frame-Options header.",
         "recommendation": "Add X-Frame-Options (e.g. DENY or SAMEORIGIN) to reduce clickjacking risk.",
     },
     "x-content-type-options": {
         "title": "Missing X-Content-Type-Options",
         "severity": "Medium",
         "confidence": "High",
-        "description": "Response does not define an X-Content-Type-Options header.",
         "recommendation": "Add X-Content-Type-Options: nosniff to reduce MIME-sniffing risk.",
     },
     "strict-transport-security": {
         "title": "Missing Strict-Transport-Security",
         "severity": "Medium",
         "confidence": "High",
-        "description": "HTTPS response does not define an HSTS header.",
         "recommendation": "Add Strict-Transport-Security on HTTPS responses.",
     },
     "referrer-policy": {
         "title": "Missing Referrer-Policy",
         "severity": "Low",
         "confidence": "High",
-        "description": "Response does not define a Referrer-Policy header.",
         "recommendation": "Add a Referrer-Policy header such as strict-origin-when-cross-origin.",
     },
 }
@@ -160,24 +177,13 @@ def same_scope(base_url: str, candidate_url: str, allow_subdomains: bool) -> boo
 
 def normalize_url(url: str) -> str:
     p = urlparse(url)
-
     scheme = p.scheme.lower()
     netloc = p.netloc.lower()
     path = p.path.rstrip("/")
-
     if path == "":
         path = "/"
 
-    return urlunparse(
-        (
-            scheme,
-            netloc,
-            path,
-            "",
-            p.query,
-            "",
-        )
-    )
+    return urlunparse((scheme, netloc, path, "", p.query, ""))
 
 
 def build_url_with_param(url: str, key: str, value: str) -> str:
@@ -237,7 +243,6 @@ def calculate_risk_score(counts: dict[str, int]) -> int:
 
 def domain_summary_findings(pages: list[PageResult]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-
     header_presence: dict[str, int] = {k: 0 for k in IMPORTANT_SECURITY_HEADERS.keys()}
     page_count = 0
 
@@ -378,11 +383,31 @@ def page_level_findings(pages: list[PageResult]) -> list[dict[str, Any]]:
     return findings
 
 
+def response_difference_score(base: PageResult, test: PageResult) -> tuple[int, list[str]]:
+    score = 0
+    reasons: list[str] = []
+
+    if test.error and not base.error:
+        score += 2
+        reasons.append("test request caused a connection or fetch error")
+
+    if base.status_code is not None and test.status_code is not None and base.status_code != test.status_code:
+        score += 2
+        reasons.append(f"status code changed from {base.status_code} to {test.status_code}")
+
+    if base.body and test.body:
+        diff_ratio = abs(len(test.body) - len(base.body)) / max(len(base.body), 1)
+        if diff_ratio > 0.30:
+            score += 1
+            reasons.append("response length changed significantly")
+
+    return score, reasons
+
+
 def active_sqli_tests(session: requests.Session, pages: list[PageResult], cfg: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     budget = int(cfg["active_tests_budget"])
     tested = 0
-    payload = "'"
 
     for page in pages:
         if tested >= budget:
@@ -392,39 +417,63 @@ def active_sqli_tests(session: requests.Session, pages: list[PageResult], cfg: d
 
         parsed = urlparse(page.url)
         params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if not params:
+            continue
 
         for param in params:
             if tested >= budget:
                 break
 
-            test_url = build_url_with_param(page.url, param, payload)
-            resp = safe_get(session, test_url, cfg)
-            tested += 1
+            best_match = None
+            best_score = 0
+            best_evidence = ""
 
-            if resp.error or not resp.body:
-                continue
-
-            baseline = page.body.lower() if page.body else ""
-            candidate = resp.body.lower()
-
-            matched = None
-            for pattern in SQL_ERROR_PATTERNS:
-                if re.search(pattern, candidate, re.IGNORECASE) and not re.search(pattern, baseline, re.IGNORECASE):
-                    matched = pattern
+            for payload in SQL_TEST_PAYLOADS:
+                if tested >= budget:
                     break
 
-            if matched:
+                test_url = build_url_with_param(page.url, param, payload)
+                resp = safe_get(session, test_url, cfg)
+                tested += 1
+
+                baseline_body = page.body.lower() if page.body else ""
+                test_body = resp.body.lower() if resp.body else ""
+
+                score, reasons = response_difference_score(page, resp)
+
+                matched_pattern = None
+                for pattern in SQL_ERROR_PATTERNS:
+                    base_has = bool(re.search(pattern, baseline_body, re.IGNORECASE))
+                    test_has = bool(re.search(pattern, test_body, re.IGNORECASE))
+                    if test_has and not base_has:
+                        matched_pattern = pattern
+                        score += 4
+                        reasons.append(f"SQL error pattern matched: {pattern}")
+                        break
+
+                if matched_pattern or score >= 3:
+                    evidence_text = (
+                        f"Payload used: {payload}. "
+                        + ("; ".join(reasons) if reasons else "abnormal behavior detected after parameter mutation.")
+                    )
+                    if score > best_score:
+                        best_score = score
+                        best_match = test_url
+                        best_evidence = evidence_text
+
+            if best_match and best_score >= 3:
+                confidence = "High" if best_score >= 5 else "Medium"
                 add_finding(
                     findings,
                     {
                         "scope": "page",
                         "type": "Possible SQL Injection",
                         "severity": "High",
-                        "confidence": "Medium",
+                        "confidence": confidence,
                         "status": "Possible",
-                        "url": test_url,
+                        "url": best_match,
                         "parameter": param,
-                        "evidence": f"SQL error-like pattern appeared after parameter mutation. Pattern matched: {matched}",
+                        "evidence": best_evidence,
                         "recommendation": "Use parameterized queries, prepared statements, and strict server-side validation.",
                     },
                     ("sqli", page.url, param),
@@ -461,6 +510,8 @@ def active_xss_tests(session: requests.Session, pages: list[PageResult], cfg: di
 
         parsed = urlparse(page.url)
         params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if not params:
+            continue
 
         for param in params:
             if tested >= budget:
