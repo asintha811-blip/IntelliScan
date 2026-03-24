@@ -404,10 +404,10 @@ def response_difference_score(base: PageResult, test: PageResult) -> tuple[int, 
     return score, reasons
 
 
-def active_sqli_tests(session: requests.Session, pages: list[PageResult], cfg: dict[str, Any]) -> list[dict[str, Any]]:
-    findings: list[dict[str, Any]] = []
-    budget = int(cfg["active_tests_budget"])
+def active_sqli_tests(session, pages, cfg):
+    findings = []
     tested = 0
+    budget = int(cfg["active_tests_budget"])
 
     for page in pages:
         if tested >= budget:
@@ -424,60 +424,41 @@ def active_sqli_tests(session: requests.Session, pages: list[PageResult], cfg: d
             if tested >= budget:
                 break
 
-            best_match = None
-            best_score = 0
-            best_evidence = ""
+            # baseline (original)
+            base_resp = safe_get(session, page.url, cfg)
+            tested += 1
 
-            for payload in SQL_TEST_PAYLOADS:
-                if tested >= budget:
-                    break
+            # TRUE condition
+            true_url = build_url_with_param(page.url, param, "1 OR 1=1")
+            true_resp = safe_get(session, true_url, cfg)
+            tested += 1
 
-                test_url = build_url_with_param(page.url, param, payload)
-                resp = safe_get(session, test_url, cfg)
-                tested += 1
+            # FALSE condition
+            false_url = build_url_with_param(page.url, param, "1 AND 1=2")
+            false_resp = safe_get(session, false_url, cfg)
+            tested += 1
 
-                baseline_body = page.body.lower() if page.body else ""
-                test_body = resp.body.lower() if resp.body else ""
+            if not (base_resp.body and true_resp.body and false_resp.body):
+                continue
 
-                score, reasons = response_difference_score(page, resp)
+            base_len = len(base_resp.body)
+            true_len = len(true_resp.body)
+            false_len = len(false_resp.body)
 
-                matched_pattern = None
-                for pattern in SQL_ERROR_PATTERNS:
-                    base_has = bool(re.search(pattern, baseline_body, re.IGNORECASE))
-                    test_has = bool(re.search(pattern, test_body, re.IGNORECASE))
-                    if test_has and not base_has:
-                        matched_pattern = pattern
-                        score += 4
-                        reasons.append(f"SQL error pattern matched: {pattern}")
-                        break
-
-                if matched_pattern or score >= 3:
-                    evidence_text = (
-                        f"Payload used: {payload}. "
-                        + ("; ".join(reasons) if reasons else "abnormal behavior detected after parameter mutation.")
-                    )
-                    if score > best_score:
-                        best_score = score
-                        best_match = test_url
-                        best_evidence = evidence_text
-
-            if best_match and best_score >= 3:
-                confidence = "High" if best_score >= 5 else "Medium"
-                add_finding(
-                    findings,
-                    {
-                        "scope": "page",
-                        "type": "Possible SQL Injection",
-                        "severity": "High",
-                        "confidence": confidence,
-                        "status": "Possible",
-                        "url": best_match,
-                        "parameter": param,
-                        "evidence": best_evidence,
-                        "recommendation": "Use parameterized queries, prepared statements, and strict server-side validation.",
-                    },
-                    ("sqli", page.url, param),
-                )
+            # logic: true response similar to base, false different
+            if abs(true_len - base_len) < 100 and abs(false_len - base_len) > 200:
+                findings.append({
+                    "scope": "page",
+                    "type": "SQL Injection",
+                    "severity": "High",
+                    "confidence": "High",
+                    "status": "Confirmed",
+                    "url": true_url,
+                    "parameter": param,
+                    "evidence": "Boolean-based response difference detected (TRUE vs FALSE condition).",
+                    "recommendation": "Use parameterized queries and input validation."
+                })
+                return findings
 
     return findings
 
