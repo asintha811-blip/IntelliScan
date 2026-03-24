@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>IntelliScan - Scan Result</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+  <div class="bg-orb orb-3"></div>
+
+  <div class="container">
+    <header class="hero glass">
+      <div class="brand-pill">Scan Result</div>
+      <h1>IntelliScan</h1>
+      <p>{{ scan.summary.target }}</p>
+    </header>
+
+    <section class="stats">
+      <div class="glass stat">
+        <h3>Total Findings</h3>
+        <p>{{ scan.summary.total_findings }}</p>
+      </div>
+      <div class="glass stat high">
+        <h3>High</h3>
+        <p>{{ scan.summary.severity_counts.High }}</p>
+      </div>
+      <div class="glass stat medium">
+        <h3>Medium</h3>
+        <p>{{ scan.summary.severity_counts.Medium }}</p>
+      </div>
+      <div class="glass stat low">
+        <h3>Low</h3>
+        <p>{{ scan.summary.severity_counts.Low }}</p>
+      </div>
+      <div class="glass stat">
+        <h3>Risk Score</h3>
+        <p>{{ scan.summary.risk_score }}</p>
+      </div>
+    </section>
+
+    <section class="glass card">
+      <h2>Downloads</h2>
+      <div class="actions">
+        <a class="btn-primary" href="/download/{{ scan.summary.scan_id }}?fmt=pdf">Download PDF</a>
+        <a class="btn-primary" href="/download/{{ scan.summary.scan_id }}?fmt=csv">Download CSV</a>
+        <a class="btn-primary" href="/download/{{ scan.summary.scan_id }}?fmt=txt">Download TXT</a>
+      </div>
+    </section>
+
+    <section class="glass card">
+      <h2>Findings</h2>
+      {% if scan.findings %}
+        {% for finding in scan.findings %}
+          <div class="finding severity-{{ finding.severity|lower }}">
+            <div class="finding-top">
+              <div>
+                <strong>{{ finding.type }}</strong>
+                <div class="finding-meta">
+                  <span class="meta-chip">{{ finding.status }}</span>
+                  <span class="meta-chip">{{ finding.confidence }} Confidence</span>
+                  <span class="meta-chip">{{ finding.scope|capitalize }} Scope</span>
+                </div>
+              </div>
+              <span class="badge badge-{{ finding.severity|lower }}">{{ finding.severity }}</span>
+            </div>
+
+            {% if finding.url %}
+              <p><strong>URL:</strong> {{ finding.url }}</p>
+            {% endif %}
+
+            {% if finding.parameter %}
+              <p><strong>Parameter:</strong> {{ finding.parameter }}</p>
+            {% endif %}
+
+            <p><strong>Evidence:</strong> {{ finding.evidence }}</p>
+            <p><strong>Recommendation:</strong> {{ finding.recommendation }}</p>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted">No findings were identified for the configured checks.</p>
+      {% endif %}
+    </section>
+
+    <section class="glass card">
+      <h2>Pages Scanned</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>URL</th>
+            <th>Status</th>
+            <th>Response Time (ms)</th>
+            <th>Forms</th>
+            <th>Links</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in scan.pages %}
+          <tr>
+            <td>{{ p.url }}</td>
+            <td>{{ p.status_code }}</td>
+            <td>{{ p.response_time_ms }}</td>
+            <td>{{ p.forms_count }}</td>
+            <td>{{ p.links_count }}</td>
+            <td>{{ p.error or "-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="glass card">
+      <h2>Notes</h2>
+      <ul>
+        {% for note in scan.notes %}
+          <li>{{ note }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <div class="actions">
+      <a class="btn-primary" href="/">New Scan</a>
+    </div>
+  </div>
+</body>
+</html>

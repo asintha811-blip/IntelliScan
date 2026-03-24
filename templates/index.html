@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>IntelliScan</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+  <div class="bg-orb orb-3"></div>
+
+  <div class="container">
+    <header class="hero glass">
+      <div class="brand-pill">Security Scanner</div>
+      <h1>IntelliScan</h1>
+      <p>AI-Enhanced Web Application Vulnerability Scanner</p>
+    </header>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="alert glass">
+          {% for msg in messages %}
+            <div>{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <section class="glass card">
+      <h2>Start Scan</h2>
+      <form method="post" action="/scan" onsubmit="showLoading()">
+        <label>Target URL</label>
+        <input type="text" name="target" placeholder="https://example.com" required>
+
+        <div class="grid">
+          <div>
+            <label>Max Pages</label>
+            <input type="number" name="max_pages" value="{{ cfg.max_pages }}">
+          </div>
+          <div>
+            <label>Max Depth</label>
+            <input type="number" name="max_depth" value="{{ cfg.max_depth }}">
+          </div>
+          <div>
+            <label>Connect Timeout</label>
+            <input type="number" step="0.1" name="connect_timeout" value="{{ cfg.connect_timeout }}">
+          </div>
+          <div>
+            <label>Read Timeout</label>
+            <input type="number" step="0.1" name="read_timeout" value="{{ cfg.read_timeout }}">
+          </div>
+          <div>
+            <label>Active Test Budget</label>
+            <input type="number" name="active_tests_budget" value="{{ cfg.active_tests_budget }}">
+          </div>
+          <div>
+            <label>Allow Subdomains</label>
+            <select name="allow_subdomains">
+              <option value="false">False</option>
+              <option value="true">True</option>
+            </select>
+          </div>
+        </div>
+
+        <p class="warning">
+          Ethical Use Only: Scan only systems you own or have explicit authorization to test.
+        </p>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-primary">Run Scan</button>
+        </div>
+      </form>
+
+      <div id="loading" class="loading glass" style="display:none;">
+        Scanning in progress... Please wait.
+      </div>
+    </section>
+
+    <section class="glass card">
+      <h2>Recent Scans</h2>
+      {% if recent_scans %}
+        <table>
+          <thead>
+            <tr>
+              <th>Target</th>
+              <th>Risk Score</th>
+              <th>Findings</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for scan in recent_scans %}
+            <tr>
+              <td>{{ scan.summary.target }}</td>
+              <td>{{ scan.summary.risk_score }}</td>
+              <td>{{ scan.summary.total_findings }}</td>
+              <td><a class="text-link" href="{{ url_for('view_scan', scan_id=scan.summary.scan_id) }}">View</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No scans yet.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <script>
+    function showLoading() {
+      document.getElementById("loading").style.display = "block";
+    }
+  </script>
+</body>
+</html>
