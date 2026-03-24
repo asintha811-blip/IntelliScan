@@ -27,13 +27,13 @@ SCANS: dict[str, dict] = {}
 DEFAULT_CFG = {
     "max_pages": 8,
     "max_depth": 1,
-    "connect_timeout": 8,
-    "read_timeout": 15,
+    "connect_timeout": 15,
+    "read_timeout": 20,
     "max_retries": 1,
     "backoff_factor": 0.5,
     "verify_ssl": True,
     "allow_subdomains": False,
-    "active_tests_budget": 4,
+    "active_tests_budget": 12,
     "user_agent": "IntelliScan (Educational Security Scanner)",
 }
 
